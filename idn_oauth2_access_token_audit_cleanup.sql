@@ -1,0 +1,146 @@
+CREATE PROCEDURE IDN_OAUTH2_ACCESS_TOKEN_AUDIT_CLEANUP
+AS
+
+BEGIN
+
+-- ------------------------------------------
+-- DECLARE VARIABLES
+-- ------------------------------------------
+DECLARE @batchSize INT;
+DECLARE @chunkSize INT;
+DECLARE @checkCount INT;
+DECLARE @sleepTime AS VARCHAR(12);
+DECLARE @rowCount INT;
+DECLARE @enableLog BIT;
+DECLARE @logLevel VARCHAR(10);
+DECLARE @SQL NVARCHAR(MAX);
+DECLARE @chunkCount INT;
+DECLARE @batchCount INT;
+DECLARE @deleteCount INT;
+
+-- ------------------------------------------
+-- CONFIGURABLE ATTRIBUTES
+-- ------------------------------------------
+SET @batchSize = 1000;      -- SET BATCH SIZE FOR AVOID TABLE LOCKS    [DEFAULT : 10000]
+SET @chunkSize = 10000;      -- CHUNK WISE DELETE FOR LARGE TABLES [DEFULT : 500000]
+SET @checkCount = 1; -- SET CHECK COUNT FOR FINISH CLEANUP SCRIPT (CLEANUP ELIGIBLE TOKENS COUNT SHOULD BE HIGHER THAN checkCount TO CONTINUE) [DEFAULT : 100]
+SET @sleepTime = '00:00:02.000';  -- SET SLEEP TIME FOR AVOID TABLE LOCKS     [DEFAULT : 2]
+SET @enableLog = 'TRUE';       -- ENABLE LOGGING [DEFAULT : FALSE]
+SET @logLevel = 'TRACE';    -- SET LOG LEVELS : TRACE , DEBUG
+
+IF (@enableLog = 1)
+BEGIN
+SELECT '[' + convert(varchar, getdate(), 121) + '] CLEANUP STARTED ... !' AS 'INFO LOG';
+END;
+
+
+---- ------------------------------------------------------
+---- BATCH DELETE IDN_OAUTH2_ACCESS_TOKEN_AUDIT
+---- ------------------------------------------------------
+
+IF (@enableLog = 1)
+BEGIN
+SELECT '[' + convert(varchar, getdate(), 121) + '] CLEANUP ON IDN_OAUTH2_ACCESS_TOKEN_AUDIT STARTED .... !';
+END
+
+
+WHILE (1=1)
+BEGIN
+		IF (EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'CHUNK_IDN_OAUTH2_ACCESS_TOKEN_AUDIT'))
+		BEGIN
+		DROP TABLE CHUNK_IDN_OAUTH2_ACCESS_TOKEN_AUDIT;
+		END
+
+		CREATE TABLE CHUNK_IDN_OAUTH2_ACCESS_TOKEN_AUDIT (TOKEN_ID VARCHAR (255),CONSTRAINT IDN_CHNK_OATH_ACCS_TOK_PRI PRIMARY KEY (TOKEN_ID));
+
+		INSERT INTO CHUNK_IDN_OAUTH2_ACCESS_TOKEN_AUDIT (TOKEN_ID) SELECT TOP (@chunkSize) TOKEN_ID FROM IDN_OAUTH2_ACCESS_TOKEN_AUDIT;
+		SELECT @chunkCount =  @@rowcount;
+
+		IF (@chunkCount < @checkCount)
+		BEGIN
+		BREAK;
+		END
+
+		IF (@enableLog = 1 AND @logLevel IN ('TRACE'))
+		BEGIN
+		SELECT '[' + convert(varchar, getdate(), 121) + '] CHUNK TABLE CHUNK_IDN_OAUTH2_ACCESS_TOKEN_AUDIT CREATED WITH : '+CAST(@chunkCount as varchar);
+		END
+
+		WHILE (1=1)
+		BEGIN
+			IF (EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'BATCH_IDN_OAUTH2_ACCESS_TOKEN_AUDIT'))
+			BEGIN
+			DROP TABLE BATCH_IDN_OAUTH2_ACCESS_TOKEN_AUDIT;
+			END
+
+			CREATE TABLE BATCH_IDN_OAUTH2_ACCESS_TOKEN_AUDIT (TOKEN_ID VARCHAR (255),CONSTRAINT IDN_BATCH_OATH_ACCS_TOK_PRI PRIMARY KEY (TOKEN_ID));
+
+			INSERT INTO BATCH_IDN_OAUTH2_ACCESS_TOKEN_AUDIT (TOKEN_ID) SELECT TOP (@batchSize) TOKEN_ID FROM CHUNK_IDN_OAUTH2_ACCESS_TOKEN;
+			SELECT @batchCount =  @@rowcount;
+
+			IF(@batchCount = 0)
+			BEGIN
+			BREAK;
+			END
+
+			IF ((@batchCount > 0))
+			BEGIN
+
+				IF (@enableLog = 1 AND @logLevel IN ('TRACE'))
+				BEGIN
+				SELECT '[' + convert(varchar, getdate(), 121) + '] BATCH DELETE START ON TABLE IDN_OAUTH2_ACCESS_TOKEN_AUDIT WITH : '+CAST(@batchCount as varchar);
+				END
+
+				DELETE IDN_OAUTH2_ACCESS_TOKEN_AUDIT where TOKEN_ID in (select TOKEN_ID from  BATCH_IDN_OAUTH2_ACCESS_TOKEN_AUDIT);
+				SELECT  @deleteCount= @@rowcount;
+
+				IF (@enableLog = 1)
+				BEGIN
+				SELECT '[' + convert(varchar, getdate(), 121) + '] BATCH DELETE FINISHED ON IDN_OAUTH2_ACCESS_TOKEN_AUDIT WITH : '+CAST(@deleteCount as varchar);
+				END
+
+				DELETE CHUNK_IDN_OAUTH2_ACCESS_TOKEN_AUDIT WHERE TOKEN_ID in (select TOKEN_ID from BATCH_IDN_OAUTH2_ACCESS_TOKEN_AUDIT);
+
+				IF (@enableLog = 1 AND @logLevel IN ('TRACE'))
+				BEGIN
+				SELECT '[' + convert(varchar, getdate(), 121) + '] DELETED BATCH ON  CHUNK_IDN_OAUTH2_ACCESS_TOKEN_AUDIT !';
+				END
+
+				IF ((@deleteCount > 0))
+				BEGIN
+				SELECT '[' + convert(varchar, getdate(), 121) + '] SLEEPING ...';
+				WAITFOR DELAY @sleepTime;
+				END
+			END
+		END
+END
+
+IF (@enableLog = 1 AND @logLevel IN ('TRACE'))
+BEGIN
+SELECT '[' + convert(varchar, getdate(), 121) + '] DELETING TABLES UTILIZED FOR THE CLEANUP SCRIPT....!';
+END
+
+IF (EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'BATCH_IDN_OAUTH2_ACCESS_TOKEN_AUDIT'))
+BEGIN
+	DROP TABLE BATCH_IDN_OAUTH2_ACCESS_TOKEN_AUDIT;
+	IF (@enableLog = 1 AND @logLevel IN ('TRACE'))
+	BEGIN
+	SELECT '[' + convert(varchar, getdate(), 121) + '] DELETED TABLE BATCH_IDN_OAUTH2_ACCESS_TOKEN_AUDIT....!';
+	END
+END
+
+IF (EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'CHUNK_IDN_OAUTH2_ACCESS_TOKEN_AUDIT'))
+BEGIN
+	DROP TABLE CHUNK_IDN_OAUTH2_ACCESS_TOKEN_AUDIT;
+	IF (@enableLog = 1 AND @logLevel IN ('TRACE'))
+	BEGIN
+	SELECT '[' + convert(varchar, getdate(), 121) + '] DELETED TABLE CHUNK_IDN_OAUTH2_ACCESS_TOKEN_AUDIT....!';
+	END
+END
+
+IF (@enableLog = 1)
+BEGIN
+SELECT '[' + convert(varchar, getdate(), 121) + '] CLEANUP ON IDN_OAUTH2_ACCESS_TOKEN_AUDIT COMPLETED .... !';
+END
+
+END
