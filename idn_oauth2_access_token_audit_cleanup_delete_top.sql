@@ -44,9 +44,11 @@ END
 
 WHILE (1=1)
 BEGIN
+    SET FMTONLY ON
     SELECT TOP(@chunkSize) TOKEN_ID FROM IDN_OAUTH2_ACCESS_TOKEN_AUDIT
     SELECT @chunkCount =  @@rowcount;
-    IF (@chunkCount < @checkCount)
+    SET FMTONLY OFF
+    IF (@chunkCount > @checkCount)
     BEGIN
         DELETE TOP(@batchCount) FROM IDN_OAUTH2_ACCESS_TOKEN_AUDIT;
         SELECT @deleteCount = @@rowcount;
