@@ -47,7 +47,7 @@ BEGIN
     SELECT @chunkCount = COUNT(1) FROM (SELECT TOP(@chunkSize) TOKEN_ID FROM IDN_OAUTH2_ACCESS_TOKEN_AUDIT) AS TEST_COUNT
     IF (@chunkCount > @checkCount)
     BEGIN
-        DELETE TOP(@batchCount) FROM IDN_OAUTH2_ACCESS_TOKEN_AUDIT;
+        DELETE TOP(@batchSize) FROM IDN_OAUTH2_ACCESS_TOKEN_AUDIT;
         SELECT @deleteCount = @@rowcount;
         IF (@enableLog = 1)
         BEGIN
